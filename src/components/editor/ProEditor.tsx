@@ -8,7 +8,7 @@ import ProLeftPanel from './ProLeftPanel';
 import ProPreview from './ProPreview';
 import ProTimeline from './ProTimeline';
 import ProInspector from './ProInspector';
-import DownloaderModal from './DownloaderModal';
+import { DownloaderModal } from './DownloaderModal';
 import { AIModal } from './DownloaderModal';
 import { ExportModal } from './DownloaderModal';
 import ColorGradePanel from './ColorGradePanel';
