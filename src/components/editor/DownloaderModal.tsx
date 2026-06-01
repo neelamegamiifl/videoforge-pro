@@ -5,7 +5,102 @@ import { v4 as uuid } from 'uuid';
 import { renderProject } from '@/lib/ffmpeg';
 
 /* ── AI MODAL ── */
-const AI_FEATURES=[{id:'captions',icon:'💬',label:'Auto Captions',col:'#06b6d4'},{id:'script',icon:'📝',label:'Script Writer',col:'#7c3aed'},{id:'enhance',icon:'✨',label:'Color Grade AI',col:'#10b981'},{id:'analyze',icon:'🔍',label:'Video Analyzer',col:'#f59e0b'},{id:'titles',icon:'🎯',label:'Title Generator',col:'#e8375a'},{id:'hashtags',icon:'#️⃣',label:'Hashtag AI',col:'#ec4899'}];
+const AI_FEATURES=[
+  {id:'captions',icon:'💬',label:'Auto Captions',col:'#06b6d4',desc:'Generate timed captions for your video'},
+  {id:'script',icon:'📝',label:'Script Writer',col:'#7c3aed',desc:'Write a viral script for your platform'},
+  {id:'enhance',icon:'✨',label:'Color Grade AI',col:'#10b981',desc:'AI-suggested color grading preset'},
+  {id:'analyze',icon:'🔍',label:'Video Analyzer',col:'#f59e0b',desc:'SEO score and improvement tips'},
+  {id:'titles',icon:'🎯',label:'Title Generator',col:'#e8375a',desc:'5 high-converting title ideas'},
+  {id:'hashtags',icon:'#️⃣',label:'Hashtag AI',col:'#ec4899',desc:'Trending hashtags for your niche'},
+];
+
+// FIX: formatted AI result renderers instead of raw JSON
+function AIResultView({ feat, data }: { feat: string; data: any }) {
+  const bd='#1a1a28', t='#dde0ee', m='#8888aa', c='#111118';
+  if (feat === 'captions' && data.captions) {
+    return (
+      <div>
+        {data.captions.map((cap: any, i: number) => (
+          <div key={i} style={{display:'flex',gap:10,padding:'6px 0',borderBottom:`1px solid ${bd}`,fontSize:12}}>
+            <span style={{color:'#06b6d4',fontFamily:'monospace',flexShrink:0,minWidth:40}}>{cap.time.toFixed(1)}s</span>
+            <span style={{color:t}}>{cap.text}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  if (feat === 'script' && data.hook) {
+    return (
+      <div style={{fontSize:12,color:t}}>
+        <div style={{fontWeight:700,color:'#7c3aed',marginBottom:6}}>{data.title}</div>
+        <div style={{background:'#7c3aed15',borderRadius:6,padding:'8px 10px',marginBottom:8,borderLeft:'3px solid #7c3aed'}}><strong>Hook:</strong> {data.hook}</div>
+        {data.sections?.map((s: any, i: number) => (
+          <div key={i} style={{background:c,borderRadius:6,padding:'7px 10px',marginBottom:5}}>
+            <div style={{color:m,fontSize:10,marginBottom:2}}>{s.startTime}s – {s.endTime}s · {s.note}</div>
+            <div>{s.text}</div>
+          </div>
+        ))}
+        <div style={{color:'#10b981',marginTop:8}}><strong>CTA:</strong> {data.cta}</div>
+        <div style={{marginTop:4,color:m}}>{data.hashtags?.join(' ')}</div>
+      </div>
+    );
+  }
+  if (feat === 'enhance' && data.brightness !== undefined) {
+    return (
+      <div style={{fontSize:12,color:t}}>
+        <div style={{fontWeight:700,color:'#10b981',marginBottom:8}}>Suggested Grade: {data.colorGrade}</div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:5,marginBottom:8}}>
+          {['brightness','contrast','saturation','sharpness','temperature','shadows'].map(k=>(
+            <div key={k} style={{background:c,borderRadius:5,padding:'5px 7px',textAlign:'center'}}>
+              <div style={{fontWeight:700,color:'#10b981'}}>{data[k]>0?'+':''}{data[k]}</div>
+              <div style={{fontSize:10,color:m}}>{k}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{color:m,fontSize:11}}>{data.tips?.map((tip: string, i: number) => <div key={i}>💡 {tip}</div>)}</div>
+      </div>
+    );
+  }
+  if (feat === 'titles' && data.titles) {
+    return (
+      <div style={{fontSize:12,color:t}}>
+        {data.titles.map((tt: any, i: number) => (
+          <div key={i} style={{background:c,borderRadius:7,padding:'9px 12px',marginBottom:6,display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:8}}>
+            <div><div style={{fontWeight:700}}>{tt.title}</div><div style={{color:m,fontSize:11,marginTop:2}}>{tt.hook}</div></div>
+            <div style={{flexShrink:0,background:'#e8375a15',color:'#e8375a',borderRadius:12,padding:'2px 8px',fontSize:11,fontWeight:700}}>{tt.score}</div>
+          </div>
+        ))}
+        {data.thumbnailText&&<div style={{background:'#f59e0b15',borderRadius:6,padding:'7px 10px',color:'#f59e0b',fontWeight:700}}>Thumbnail text: {data.thumbnailText}</div>}
+      </div>
+    );
+  }
+  if (feat === 'hashtags' && data.combined) {
+    return (
+      <div style={{fontSize:13,color:t}}>
+        <div style={{display:'flex',flexWrap:'wrap' as const,gap:5,marginBottom:8}}>
+          {data.hashtags?.map((h: string, i: number) => <span key={i} style={{background:'#ec4899',background:'#ec489915',color:'#ec4899',borderRadius:12,padding:'3px 10px',fontSize:12}}>{h}</span>)}
+          {data.niche?.map((h: string, i: number) => <span key={i} style={{background:'#7c3aed15',color:'#7c3aed',borderRadius:12,padding:'3px 10px',fontSize:12}}>{h}</span>)}
+          {data.trending?.map((h: string, i: number) => <span key={i} style={{background:'#10b98115',color:'#10b981',borderRadius:12,padding:'3px 10px',fontSize:12}}>{h}</span>)}
+        </div>
+        <div style={{color:'#8888aa',fontSize:11}}>Full string ready to copy: <span style={{color:t}}>{data.combined}</span></div>
+      </div>
+    );
+  }
+  if (feat === 'analyze' && data.score) {
+    return (
+      <div style={{fontSize:12,color:t}}>
+        <div style={{fontSize:28,fontWeight:800,color:data.score>80?'#10b981':data.score>60?'#f59e0b':'#e8375a',marginBottom:8}}>Score: {data.score}/100</div>
+        <div style={{marginBottom:8}}><strong style={{color:'#8888aa'}}>Best post time:</strong> {data.bestPostTime}</div>
+        <div style={{marginBottom:6,fontWeight:700,color:'#8888aa'}}>Improvements:</div>
+        {data.improvements?.map((tip: string, i: number) => <div key={i} style={{marginBottom:3}}>• {tip}</div>)}
+        <div style={{marginTop:8,marginBottom:6,fontWeight:700,color:'#8888aa'}}>Trending formats:</div>
+        {data.trending?.map((tr: string, i: number) => <div key={i} style={{marginBottom:3}}>📈 {tr}</div>)}
+      </div>
+    );
+  }
+  // Generic fallback for unknown types
+  return <pre style={{whiteSpace:'pre-wrap' as const,lineHeight:1.6,fontFamily:'inherit',fontSize:11,color:t}}>{JSON.stringify(data,null,2)}</pre>;
+}
 
 export function AIModal({onClose,notify}:{onClose:()=>void;notify:(m:string,t?:any)=>void}) {
   const store=useStore();
@@ -35,7 +130,7 @@ export function AIModal({onClose,notify}:{onClose:()=>void;notify:(m:string,t?:a
 
   return (
     <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.75)',zIndex:300,display:'flex',alignItems:'center',justifyContent:'center',backdropFilter:'blur(8px)'}} onClick={onClose}>
-      <div onClick={e=>e.stopPropagation()} style={{background:bg,border:`1px solid ${bd}`,borderRadius:16,width:580,maxHeight:'82vh',overflow:'auto',boxShadow:'0 30px 80px rgba(0,0,0,.7),0 0 40px rgba(124,58,237,.2)',animation:'slideUp .2s ease'}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:bg,border:`1px solid ${bd}`,borderRadius:16,width:580,maxHeight:'82vh',overflow:'auto',boxShadow:'0 30px 80px rgba(0,0,0,.7),0 0 40px rgba(124,58,237,.2)'}}>
         <div style={{padding:'16px 20px',borderBottom:`1px solid ${bd}`,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
           <div><div style={{fontWeight:800,fontSize:17,background:'linear-gradient(135deg,#e8375a,#7c3aed)',WebkitBackgroundClip:'text',WebkitTextFillColor:'transparent'}}>✦ AI Studio</div><div style={{fontSize:11,color:m}}>Powered by Claude · {store.project.clips.length} clips loaded</div></div>
           <button onClick={onClose} style={{background:'none',border:'none',color:m,cursor:'pointer',fontSize:20}}>✕</button>
@@ -46,16 +141,16 @@ export function AIModal({onClose,notify}:{onClose:()=>void;notify:(m:string,t?:a
             {AI_FEATURES.map(f=>(
               <button key={f.id} onClick={()=>run(f.id)} style={{background:feat===f.id?`${f.col}18`:c,border:`1px solid ${feat===f.id?f.col:bd}`,borderRadius:10,padding:'13px',cursor:'pointer',textAlign:'left' as const,transition:'all .15s',color:t}}>
                 <div style={{display:'flex',alignItems:'center',gap:7,marginBottom:3}}><span style={{fontSize:20}}>{f.icon}</span><span style={{fontWeight:700,fontSize:13}}>{f.label}</span></div>
+                <div style={{fontSize:11,color:m}}>{f.desc}</div>
               </button>
             ))}
           </div>
-          {loading&&<div style={{textAlign:'center',padding:'26px 0',color:m}}><div style={{fontSize:34,animation:'spin 2s linear infinite',display:'inline-block',marginBottom:8}}>✦</div><div style={{fontWeight:600}}>Claude is thinking...</div></div>}
+          {loading&&<div style={{textAlign:'center',padding:'26px 0',color:m}}><div style={{fontSize:34,display:'inline-block',marginBottom:8}}>✦</div><div style={{fontWeight:600}}>Claude is thinking...</div></div>}
           {result&&!loading&&(
-            <div style={{background:c,border:`1px solid ${bd}`,borderRadius:12,padding:16,animation:'slideUp .2s ease'}}>
+            <div style={{background:c,border:`1px solid ${bd}`,borderRadius:12,padding:16}}>
               {result.error&&<div style={{color:'#e8375a'}}>⚠ {result.error}</div>}
-              {result.data&&<div style={{fontSize:12,color:t,maxHeight:300,overflow:'auto'}}>
-                <pre style={{whiteSpace:'pre-wrap' as const,lineHeight:1.6,fontFamily:'inherit'}}>{JSON.stringify(result.data,null,2)}</pre>
-              </div>}
+              {/* FIX: formatted result view instead of raw JSON */}
+              {result.data&&<AIResultView feat={feat||''} data={result.data}/>}
               {result.data&&<button onClick={apply} style={{width:'100%',marginTop:12,background:'linear-gradient(135deg,#e8375a,#7c3aed)',border:'none',borderRadius:8,padding:'10px',color:'#fff',fontWeight:700,cursor:'pointer',fontSize:13}}>✓ Apply to Project</button>}
             </div>
           )}
@@ -66,8 +161,21 @@ export function AIModal({onClose,notify}:{onClose:()=>void;notify:(m:string,t?:a
 }
 
 /* ── DOWNLOADER MODAL ── */
-const VID_PLATS=[{n:'YouTube',i:'▶️',p:'youtube.com'},{n:'TikTok',i:'🎵',p:'tiktok.com'},{n:'Instagram',i:'📸',p:'instagram.com'},{n:'Twitter/X',i:'🐦',p:'twitter.com'},{n:'Facebook',i:'👥',p:'facebook.com'},{n:'Vimeo',i:'🎬',p:'vimeo.com'}];
-const MUS_PLATS=[{n:'Spotify',i:'🟢',p:'spotify.com'},{n:'Apple Music',i:'🎵',p:'music.apple.com'},{n:'YouTube Music',i:'🔴',p:'music.youtube.com'},{n:'SoundCloud',i:'🟠',p:'soundcloud.com'},{n:'Deezer',i:'🎧',p:'deezer.com'}];
+const VID_PLATS=[
+  {n:'YouTube',i:'▶️',url:'https://youtube.com'},
+  {n:'TikTok',i:'🎵',url:'https://tiktok.com'},
+  {n:'Instagram',i:'📸',url:'https://instagram.com'},
+  {n:'Twitter/X',i:'🐦',url:'https://twitter.com'},
+  {n:'Facebook',i:'👥',url:'https://facebook.com'},
+  {n:'Vimeo',i:'🎬',url:'https://vimeo.com'},
+];
+const MUS_PLATS=[
+  {n:'Spotify',i:'🟢',url:'https://open.spotify.com'},
+  {n:'Apple Music',i:'🎵',url:'https://music.apple.com'},
+  {n:'YouTube Music',i:'🔴',url:'https://music.youtube.com'},
+  {n:'SoundCloud',i:'🟠',url:'https://soundcloud.com'},
+  {n:'Deezer',i:'🎧',url:'https://deezer.com'},
+];
 
 export function DownloaderModal({tab,onClose,onFile,notify}:{tab:'video'|'music';onClose:()=>void;onFile:(f:File)=>void;notify:(m:string,t?:any)=>void}) {
   const [url,setUrl]=useState('');
@@ -78,6 +186,8 @@ export function DownloaderModal({tab,onClose,onFile,notify}:{tab:'video'|'music'
 
   const go=async()=>{
     if(!url.trim()){notify('Paste a URL','err');return;}
+    // FIX: basic URL validation
+    if(!url.startsWith('http')){notify('Please paste a full URL starting with https://','err');return;}
     setLoading(true);setResult(null);
     try{
       const r=await fetch(tab==='video'?'/api/download':'/api/music',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url,quality})});
@@ -90,21 +200,28 @@ export function DownloaderModal({tab,onClose,onFile,notify}:{tab:'video'|'music'
   const plats=tab==='video'?VID_PLATS:MUS_PLATS;
   return (
     <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.75)',zIndex:300,display:'flex',alignItems:'center',justifyContent:'center',backdropFilter:'blur(8px)'}} onClick={onClose}>
-      <div onClick={e=>e.stopPropagation()} style={{background:bg,border:`1px solid ${bd}`,borderRadius:16,width:550,maxHeight:'80vh',overflow:'auto',boxShadow:'0 30px 80px rgba(0,0,0,.7)',animation:'slideUp .2s ease'}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:bg,border:`1px solid ${bd}`,borderRadius:16,width:550,maxHeight:'80vh',overflow:'auto',boxShadow:'0 30px 80px rgba(0,0,0,.7)'}}>
         <div style={{padding:'16px 20px',borderBottom:`1px solid ${bd}`,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
           <div style={{fontWeight:800,fontSize:17,color:t}}>{tab==='video'?'📥 Video Downloader':'🎵 Music Downloader'}</div>
           <button onClick={onClose} style={{background:'none',border:'none',color:m,cursor:'pointer',fontSize:20}}>✕</button>
         </div>
         <div style={{padding:20}}>
+          {/* FIX: platform buttons open the site in a new tab, not paste domain as URL */}
+          <div style={{fontSize:11,color:m,marginBottom:6}}>Open platform to copy a URL:</div>
           <div style={{display:'flex',flexWrap:'wrap' as const,gap:6,marginBottom:14}}>
-            {plats.map(p=><button key={p.n} onClick={()=>setUrl(p.p)} style={{background:c,border:`1px solid ${bd}`,borderRadius:20,padding:'5px 12px',cursor:'pointer',color:t,fontSize:12,fontWeight:600}}>{p.i} {p.n}</button>)}
+            {plats.map(p=>(
+              <button key={p.n} onClick={()=>window.open(p.url,'_blank')}
+                style={{background:c,border:`1px solid ${bd}`,borderRadius:20,padding:'5px 12px',cursor:'pointer',color:t,fontSize:12,fontWeight:600}}>
+                {p.i} {p.n} ↗
+              </button>
+            ))}
           </div>
           <div style={{display:'flex',gap:7,marginBottom:12}}>
-            <input value={url} onChange={e=>setUrl(e.target.value)} placeholder={`Paste ${tab} URL from any platform...`} style={{flex:1,background:c,border:`1px solid ${bd}`,borderRadius:8,padding:'10px 13px',color:t,fontSize:13,outline:'none'}}/>
+            <input value={url} onChange={e=>setUrl(e.target.value)} placeholder={`Paste ${tab} URL (https://...)...`} style={{flex:1,background:c,border:`1px solid ${bd}`,borderRadius:8,padding:'10px 13px',color:t,fontSize:13,outline:'none'}}/>
             <button onClick={go} disabled={loading} style={{background:loading?'#333':'linear-gradient(135deg,#e8375a,#c0392b)',border:'none',borderRadius:8,padding:'10px 18px',color:'#fff',fontWeight:700,cursor:loading?'not-allowed':'pointer',flexShrink:0}}>{loading?'⏳':'⬇ Get'}</button>
           </div>
           {tab==='video'&&<div style={{display:'flex',gap:5,marginBottom:14}}>{['360','720','1080','4K','audio'].map(q=><button key={q} onClick={()=>setQuality(q)} style={{flex:1,background:quality===q?'#e8375a15':c,border:`1px solid ${quality===q?'#e8375a':bd}`,borderRadius:6,padding:'6px',color:quality===q?'#e8375a':t,cursor:'pointer',fontSize:11,fontWeight:600}}>{q}</button>)}</div>}
-          {result&&!loading&&<div style={{animation:'slideUp .2s ease'}}>
+          {result&&!loading&&<div>
             {result.error&&<div style={{color:'#e8375a',padding:10,background:'#e8375a10',borderRadius:8}}>⚠ {result.error}</div>}
             {result.methods&&<div>{result.message&&<div style={{color:'#f59e0b',marginBottom:10,fontSize:12,background:'#f59e0b10',borderRadius:8,padding:10}}>{result.message}</div>}
               {result.methods.map((mx:any,i:number)=><div key={i} style={{background:c,border:`1px solid ${bd}`,borderRadius:8,padding:'11px 13px',marginBottom:7}}>
@@ -158,10 +275,11 @@ export function ExportModal({onClose,notify}:{onClose:()=>void;notify:(m:string,
         const a=document.createElement('a');a.href=url;a.download=`${store.project.name.replace(/[^a-z0-9]/gi,'_')}.mp4`;a.click();
         URL.revokeObjectURL(url);
       }else{
-        // Fallback: download first clip
+        // Fallback: download first clip blob URL
         for(let i=0;i<=100;i+=5){await new Promise(r=>setTimeout(r,80));setProgress(i);}
-        const cl=store.project.clips.find(x=>x.url);
+        const cl=store.project.clips.find(x=>x.url?.startsWith('blob:')); // FIX: only use blob URLs
         if(cl){const a=document.createElement('a');a.href=cl.url;a.download=`${store.project.name}.${format}`;a.click();}
+        else notify('No importable clip found for fallback export','err');
       }
       setDone(true);notify('✓ Export complete!');
     }catch(e:any){notify(e.message||'Export failed','err');setProgress(null);}
@@ -169,7 +287,7 @@ export function ExportModal({onClose,notify}:{onClose:()=>void;notify:(m:string,
 
   return(
     <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.75)',zIndex:300,display:'flex',alignItems:'center',justifyContent:'center',backdropFilter:'blur(8px)'}} onClick={onClose}>
-      <div onClick={e=>e.stopPropagation()} style={{background:bg,border:`1px solid ${bd}`,borderRadius:16,width:490,boxShadow:'0 30px 80px rgba(0,0,0,.7)',animation:'slideUp .2s ease',overflow:'hidden'}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:bg,border:`1px solid ${bd}`,borderRadius:16,width:490,boxShadow:'0 30px 80px rgba(0,0,0,.7)',overflow:'hidden'}}>
         <div style={{padding:'16px 20px',borderBottom:`1px solid ${bd}`,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
           <div style={{fontWeight:800,fontSize:17,color:t}}>⬇ Export Video{store.ffmpegReady&&<span style={{fontSize:12,color:'#10b981',fontWeight:600,marginLeft:8}}>FFmpeg ✓</span>}</div>
           <button onClick={onClose} style={{background:'none',border:'none',color:m,cursor:'pointer',fontSize:20}}>✕</button>
