@@ -27,6 +27,10 @@ export default function ProEditor() {
   const [recording, setRecording] = useState(false);
   const [dark, setDark] = useState(true);
 
+  // FIX: use refs for shortcut handler so we don't re-register on every currentTime change
+  const storeRef = useRef(store);
+  storeRef.current = store;
+
   // Init FFmpeg in background
   useEffect(() => {
     if (store.ffmpegReady || store.ffmpegLoading) return;
@@ -48,11 +52,12 @@ export default function ProEditor() {
       const tick = (ts: number) => {
         if (lastTsRef.current) {
           const delta = (ts - lastTsRef.current) / 1000;
-          const next = store.currentTime + delta;
-          if (next >= store.project.duration) {
-            store.setPlaying(false); store.setCurrentTime(0); audioEngine.stopAll(); return;
+          const s = storeRef.current;
+          const next = s.currentTime + delta;
+          if (next >= s.project.duration) {
+            s.setPlaying(false); s.setCurrentTime(0); audioEngine.stopAll(); return;
           }
-          store.setCurrentTime(next);
+          s.setCurrentTime(next);
         }
         lastTsRef.current = ts;
         rafRef.current = requestAnimationFrame(tick);
@@ -67,37 +72,43 @@ export default function ProEditor() {
     return () => cancelAnimationFrame(rafRef.current);
   }, [store.playing]);
 
-  // Keyboard shortcuts
+  // FIX: keyboard shortcuts use storeRef — no re-registration on time/selection changes
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      const s = storeRef.current;
       switch (e.code) {
-        case 'Space': e.preventDefault(); store.setPlaying(!store.playing); break;
-        case 'KeyJ': store.setCurrentTime(Math.max(0, store.currentTime - 5)); break;
-        case 'KeyL': store.setCurrentTime(Math.min(store.project.duration, store.currentTime + 5)); break;
-        case 'KeyK': store.setPlaying(false); break;
-        case 'Home': store.setCurrentTime(0); break;
-        case 'End': store.setCurrentTime(store.project.duration); break;
+        case 'Space': e.preventDefault(); s.setPlaying(!s.playing); break;
+        case 'KeyJ': s.setCurrentTime(Math.max(0, s.currentTime - 5)); break;
+        case 'KeyL': s.setCurrentTime(Math.min(s.project.duration, s.currentTime + 5)); break;
+        case 'KeyK': s.setPlaying(false); break;
+        case 'Home': s.setCurrentTime(0); break;
+        case 'End': s.setCurrentTime(s.project.duration); break;
         case 'Delete': case 'Backspace':
-          if (store.selectedId) {
-            store.deleteClip(store.selectedId); store.deleteAudio(store.selectedId); store.deleteText(store.selectedId);
+          if (s.selectedId) {
+            const clip = s.project.clips.find(c => c.id === s.selectedId);
+            const audio = s.project.audioTracks.find(a => a.id === s.selectedId);
+            // FIX: revoke blob URL before deleting
+            if (clip?.url?.startsWith('blob:')) URL.revokeObjectURL(clip.url);
+            if (audio?.url?.startsWith('blob:')) URL.revokeObjectURL(audio.url);
+            s.deleteClip(s.selectedId); s.deleteAudio(s.selectedId); s.deleteText(s.selectedId);
             notify('Deleted');
           }
           break;
-        case 'KeyZ': if (e.ctrlKey||e.metaKey) { e.shiftKey ? store.redo() : store.undo(); } break;
-        case 'KeyS': if (e.ctrlKey||e.metaKey) { e.preventDefault(); store.saveProject(); notify('Project saved ✓'); } break;
-        case 'KeyD': if (store.selectedId) { store.duplicateClip(store.selectedId); notify('Duplicated'); } break;
-        case 'KeyM': if (store.selectedId) { const c = store.project.clips.find(x=>x.id===store.selectedId); if(c) store.updateClip(c.id,{muted:!c.muted}); } break;
-        case 'Equal': if (e.ctrlKey||e.metaKey) { e.preventDefault(); store.setZoom(store.zoom * 1.2); } break;
-        case 'Minus': if (e.ctrlKey||e.metaKey) { e.preventDefault(); store.setZoom(store.zoom / 1.2); } break;
-        case 'KeyB': store.setActiveTool('razor'); break;
-        case 'KeyV': store.setActiveTool('select'); break;
+        case 'KeyZ': if (e.ctrlKey||e.metaKey) { e.shiftKey ? s.redo() : s.undo(); } break;
+        case 'KeyS': if (e.ctrlKey||e.metaKey) { e.preventDefault(); s.saveProject(); notify('Project saved ✓'); } break;
+        case 'KeyD': if (s.selectedId) { s.duplicateClip(s.selectedId); notify('Duplicated'); } break;
+        case 'KeyM': if (s.selectedId) { const c = s.project.clips.find(x=>x.id===s.selectedId); if(c) s.updateClip(c.id,{muted:!c.muted}); } break;
+        case 'Equal': if (e.ctrlKey||e.metaKey) { e.preventDefault(); s.setZoom(s.zoom * 1.2); } break;
+        case 'Minus': if (e.ctrlKey||e.metaKey) { e.preventDefault(); s.setZoom(s.zoom / 1.2); } break;
+        case 'KeyB': s.setActiveTool('razor'); break;
+        case 'KeyV': s.setActiveTool('select'); break;
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [store.playing, store.currentTime, store.selectedId, store.zoom]);
+  }, []); // FIX: empty deps — uses storeRef inside
 
   const notify = useCallback((msg: string, type: 'ok'|'err'|'info' = 'ok') => {
     setToast({ msg, type });
@@ -139,6 +150,14 @@ export default function ProEditor() {
     };
   }, []);
 
+  // FIX: revoke all blob URLs when starting a new project
+  const handleNewProject = useCallback(() => {
+    const s = storeRef.current;
+    s.project.clips.forEach(c => { if (c.url?.startsWith('blob:')) URL.revokeObjectURL(c.url); });
+    s.project.audioTracks.forEach(a => { if (a.url?.startsWith('blob:')) URL.revokeObjectURL(a.url); });
+    s.newProject();
+  }, []);
+
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video:true, audio:true });
@@ -174,10 +193,7 @@ export default function ProEditor() {
     return () => { window.removeEventListener('drop', onDrop); window.removeEventListener('dragover', onOver); };
   }, []);
 
-  const C = {
-    bg: '#070709', panel: '#0d0d12', border: '#1a1a28',
-    text: '#dde0ee', muted: '#8888aa',
-  };
+  const C = { bg: '#070709', panel: '#0d0d12', border: '#1a1a28', text: '#dde0ee', muted: '#8888aa' };
 
   return (
     <div style={{ display:'flex', flexDirection:'column', height:'100vh', background: C.bg, overflow:'hidden', fontFamily:'Inter,sans-serif' }}>
@@ -193,6 +209,7 @@ export default function ProEditor() {
         onExport={() => setModal('export')}
         onGrade={() => setModal('grade')}
         onMixer={() => setModal('mixer')}
+        onNewProject={handleNewProject}
         notify={notify}
       />
 
@@ -204,7 +221,6 @@ export default function ProEditor() {
 
       <ProTimeline notify={notify} />
 
-      {/* Modals */}
       {modal === 'download-video' && <DownloaderModal tab="video" onClose={() => setModal('none')} onFile={f => { addVideoFile(f); setModal('none'); }} notify={notify} />}
       {modal === 'download-music' && <DownloaderModal tab="music" onClose={() => setModal('none')} onFile={f => { addAudioFile(f); setModal('none'); }} notify={notify} />}
       {modal === 'ai' && <AIModal onClose={() => setModal('none')} notify={notify} />}
@@ -212,9 +228,8 @@ export default function ProEditor() {
       {modal === 'grade' && <ColorGradePanel onClose={() => setModal('none')} notify={notify} />}
       {modal === 'mixer' && <AudioMixerPanel onClose={() => setModal('none')} notify={notify} />}
 
-      {/* Toast */}
       {toast && (
-        <div style={{ position:'fixed', bottom:26, left:'50%', transform:'translateX(-50%)', background: toast.type==='err'?'#e8375a':toast.type==='info'?'#7c3aed':'#10b981', color:'#fff', padding:'10px 22px', borderRadius:10, fontSize:13, fontWeight:600, zIndex:9999, boxShadow:'0 8px 32px rgba(0,0,0,0.5)', animation:'slideUp .2s ease', whiteSpace:'nowrap' }}>
+        <div style={{ position:'fixed', bottom:26, left:'50%', transform:'translateX(-50%)', background: toast.type==='err'?'#e8375a':toast.type==='info'?'#7c3aed':'#10b981', color:'#fff', padding:'10px 22px', borderRadius:10, fontSize:13, fontWeight:600, zIndex:9999, boxShadow:'0 8px 32px rgba(0,0,0,0.5)', whiteSpace:'nowrap' }}>
           {toast.msg}
         </div>
       )}
