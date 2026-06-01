@@ -28,6 +28,7 @@ const FRAG_SRC = `
   uniform float u_grain;
   uniform float u_sharpness;
   uniform vec2 u_resolution;
+  uniform float u_time;
 
   vec3 adjustTemperature(vec3 color, float temp) {
     color.r += temp * 0.1;
@@ -46,10 +47,27 @@ const FRAG_SRC = `
     return fract(sin(dot(co.xy, vec2(12.9898, 78.233))) * 43758.5453);
   }
 
+  // FIX: unsharp mask implementation for u_sharpness
+  vec3 unsharpMask(vec2 uv, float strength) {
+    vec2 texel = 1.0 / u_resolution;
+    vec3 center = texture2D(u_image, uv).rgb;
+    vec3 blur =
+      texture2D(u_image, uv + vec2(-texel.x, 0.0)).rgb * 0.25 +
+      texture2D(u_image, uv + vec2( texel.x, 0.0)).rgb * 0.25 +
+      texture2D(u_image, uv + vec2(0.0, -texel.y)).rgb * 0.25 +
+      texture2D(u_image, uv + vec2(0.0,  texel.y)).rgb * 0.25;
+    return center + (center - blur) * strength;
+  }
+
   void main() {
     vec2 uv = v_texcoord;
     vec4 color = texture2D(u_image, uv);
     vec3 rgb = color.rgb;
+
+    // FIX: apply sharpness via unsharp mask before other adjustments
+    if (u_sharpness > 0.0) {
+      rgb = unsharpMask(uv, u_sharpness * 0.03);
+    }
 
     // Brightness
     rgb += u_brightness * 0.01;
@@ -76,9 +94,9 @@ const FRAG_SRC = `
       rgb *= 1.0 - vig * u_vignette * 0.015;
     }
 
-    // Film grain
+    // FIX: use u_time to animate grain so it doesn't repeat each frame
     if (u_grain > 0.0) {
-      float noise = rand(uv + fract(u_grain)) * u_grain * 0.005;
+      float noise = rand(uv + fract(u_time * 0.01)) * u_grain * 0.005;
       rgb += noise - u_grain * 0.0025;
     }
 
@@ -92,6 +110,7 @@ export class WebGLGrader {
   private program: WebGLProgram;
   private texture: WebGLTexture | null = null;
   private uniforms: Record<string, WebGLUniformLocation | null> = {};
+  private frameCount = 0;
 
   constructor(canvas: HTMLCanvasElement) {
     const gl = canvas.getContext('webgl', { preserveDrawingBuffer: true });
@@ -107,6 +126,9 @@ export class WebGLGrader {
     const sh = gl.createShader(type)!;
     gl.shaderSource(sh, src);
     gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+      console.warn('Shader compile error:', gl.getShaderInfoLog(sh));
+    }
     return sh;
   }
 
@@ -139,7 +161,9 @@ export class WebGLGrader {
 
   private cacheUniforms() {
     const { gl, program } = this;
-    ['u_brightness','u_contrast','u_saturation','u_temperature','u_tint','u_highlights','u_shadows','u_vignette','u_grain','u_sharpness','u_resolution'].forEach(name => {
+    ['u_brightness','u_contrast','u_saturation','u_temperature','u_tint',
+     'u_highlights','u_shadows','u_vignette','u_grain','u_sharpness',
+     'u_resolution','u_time'].forEach(name => {
       this.uniforms[name] = gl.getUniformLocation(program, name);
     });
   }
@@ -160,6 +184,7 @@ export class WebGLGrader {
 
   render(grade: ColorGrade, w: number, h: number) {
     const { gl } = this;
+    this.frameCount++;
     gl.viewport(0, 0, w, h);
     gl.uniform1f(this.uniforms.u_brightness, grade.brightness);
     gl.uniform1f(this.uniforms.u_contrast, grade.contrast);
@@ -172,6 +197,7 @@ export class WebGLGrader {
     gl.uniform1f(this.uniforms.u_grain, grade.grain);
     gl.uniform1f(this.uniforms.u_sharpness, grade.sharpness);
     gl.uniform2f(this.uniforms.u_resolution, w, h);
+    gl.uniform1f(this.uniforms.u_time, this.frameCount);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
 
@@ -180,13 +206,33 @@ export class WebGLGrader {
   }
 }
 
-// Apply CSS-based grade for non-WebGL fallback
+// CSS filter map — used as WebGL fallback AND for FX filters
+export const FX_CSS_MAP: Record<string, string> = {
+  'B&W': 'grayscale(1)',
+  'Sepia': 'sepia(0.85)',
+  'Warm': 'saturate(1.2) hue-rotate(-10deg)',
+  'Cool': 'saturate(0.9) hue-rotate(15deg)',
+  'Cinematic': 'contrast(1.15) saturate(0.85) brightness(0.95)',
+  'Neon': 'saturate(2) contrast(1.3)',
+  'Fade In': 'brightness(1.1) contrast(0.9)',
+  'Fade Out': 'brightness(0.9) contrast(0.9)',
+  'Blur': 'blur(3px)',
+  'Sharpen': 'contrast(1.2)',
+  'Vignette': 'brightness(0.9)',
+  'Grain': 'contrast(1.1)',
+  'Mirror': 'scaleX(-1)',
+  'Glow': 'brightness(1.2) saturate(1.3)',
+  'Distort': 'hue-rotate(45deg) saturate(1.5)',
+  'Pixelate': 'contrast(1.1)',
+};
+
+// CSS fallback for color grade
 export function getFilterCSS(grade: ColorGrade): string {
   const br = 1 + grade.brightness / 100;
   const ct = 1 + grade.contrast / 100;
   const st = 1 + grade.saturation / 100;
-  const sh = 1 + grade.sharpness / 100;
+  const sh = grade.sharpness > 0 ? `contrast(${1 + grade.sharpness / 200})` : '';
   const temp = grade.temperature;
-  const hue = temp * 0.3; // crude temperature via hue-rotate
-  return `brightness(${br}) contrast(${ct}) saturate(${st}) hue-rotate(${hue}deg)`;
+  const hue = temp * 0.3;
+  return `brightness(${br}) contrast(${ct}) saturate(${st}) hue-rotate(${hue}deg) ${sh}`.trim();
 }
