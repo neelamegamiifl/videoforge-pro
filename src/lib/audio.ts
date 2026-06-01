@@ -20,6 +20,9 @@ export class AudioEngine {
     this.analyser.connect(this.ctx.destination);
   }
 
+  // FIX: expose ctx so waveform extractors can reuse it instead of creating new AudioContext
+  get audioContext(): AudioContext | null { return this.ctx; }
+
   async loadTrack(track: AudioTrack): Promise<void> {
     if (!this.ctx || !track.url || this.buffers.has(track.id)) return;
     try {
@@ -27,9 +30,15 @@ export class AudioEngine {
       const arr = await res.arrayBuffer();
       const buf = await this.ctx.decodeAudioData(arr);
       this.buffers.set(track.id, buf);
-    } catch (e) {
+    } catch {
       console.warn('Could not load audio:', track.name);
     }
+  }
+
+  // FIX: clear buffer on track removal to free memory
+  unloadTrack(id: string) {
+    this.stopTrack(id);
+    this.buffers.delete(id);
   }
 
   playTrack(track: AudioTrack, offset: number, masterVolume: number) {
@@ -43,7 +52,6 @@ export class AudioEngine {
     source.loop = track.loop;
     source.playbackRate.value = 1;
 
-    // Gain node
     const gain = this.ctx.createGain();
     const vol = (track.volume / 100) * (masterVolume / 100);
     gain.gain.setValueAtTime(0, this.ctx.currentTime);
@@ -68,7 +76,6 @@ export class AudioEngine {
     const high = this.ctx.createBiquadFilter();
     high.type = 'highshelf'; high.frequency.value = 8000; high.gain.value = track.eq.high;
 
-    // Pan
     if (this.ctx.createStereoPanner) {
       const panner = this.ctx.createStereoPanner();
       panner.pan.value = track.pan || 0;
@@ -86,6 +93,16 @@ export class AudioEngine {
     this.sources.set(track.id, { source, gain, eq: { low, mid, high } });
   }
 
+  // FIX: implement solo — mutes all others when any track is soloed
+  playAllTracks(tracks: AudioTrack[], offset: number, masterVolume: number) {
+    const hasSolo = tracks.some(t => t.solo && !t.muted);
+    tracks.forEach(track => {
+      if (!track.url) return;
+      const effectiveMute = track.muted || (hasSolo && !track.solo);
+      this.playTrack({ ...track, muted: effectiveMute }, offset, masterVolume);
+    });
+  }
+
   stopTrack(id: string) {
     const t = this.sources.get(id);
     if (t) { try { t.source.stop(); } catch {} this.sources.delete(id); }
@@ -94,12 +111,12 @@ export class AudioEngine {
   stopAll() { this.sources.forEach((_, id) => this.stopTrack(id)); }
 
   setMasterVolume(vol: number) {
-    if (this.masterGain) this.masterGain.gain.setValueAtTime(vol / 100, this.ctx!.currentTime);
+    if (this.masterGain && this.ctx) this.masterGain.gain.setValueAtTime(vol / 100, this.ctx.currentTime);
   }
 
   updateTrackVolume(id: string, vol: number) {
     const t = this.sources.get(id);
-    if (t) t.gain.gain.setValueAtTime(vol / 100, this.ctx!.currentTime);
+    if (t && this.ctx) t.gain.gain.setValueAtTime(vol / 100, this.ctx.currentTime);
   }
 
   getAnalyserData(): Uint8Array {
@@ -123,7 +140,7 @@ export class AudioEngine {
 
 export const audioEngine = new AudioEngine();
 
-// Waveform painter for canvas
+// Waveform painter
 export function paintWaveform(canvas: HTMLCanvasElement, data: number[], color: string, bg = 'transparent') {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
@@ -138,10 +155,11 @@ export function paintWaveform(canvas: HTMLCanvasElement, data: number[], color: 
   });
 }
 
-// Extract waveform peaks from audio buffer
-export async function extractWaveformPeaks(url: string, samples = 300): Promise<number[]> {
+// FIX: reuse an existing AudioContext instead of always creating a new one
+export async function extractWaveformPeaks(url: string, samples = 300, existingCtx?: AudioContext): Promise<number[]> {
   try {
-    const ctx = new AudioContext();
+    const ownCtx = !existingCtx;
+    const ctx = existingCtx ?? new AudioContext();
     const res = await fetch(url);
     const arr = await res.arrayBuffer();
     const buf = await ctx.decodeAudioData(arr);
@@ -153,7 +171,7 @@ export async function extractWaveformPeaks(url: string, samples = 300): Promise<
       for (let j = 0; j < step; j++) max = Math.max(max, Math.abs(ch[i * step + j] || 0));
       peaks.push(max);
     }
-    ctx.close();
+    if (ownCtx) ctx.close();
     return peaks;
   } catch {
     return Array.from({ length: samples }, (_, i) => Math.sin(i / 5) * 0.4 + 0.3 + Math.random() * 0.2);
