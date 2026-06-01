@@ -1,15 +1,36 @@
 'use client';
 import { useStore, PLATFORMS, defaultGrade } from '@/store/editor';
+import { useState, useEffect } from 'react';
+
 const fmt=(s:number)=>`${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`;
+
 export default function ProInspector({ notify }:{ notify:(m:string,t?:any)=>void }) {
   const store = useStore();
   const cfg = PLATFORMS[store.project.platform];
   const bd='#1a1a28', t='#dde0ee', m='#8888aa', c='#111118', bg='#0d0d12';
   const selClip = store.project.clips.find(x=>x.id===store.selectedId);
   const selAudio = store.project.audioTracks.find(x=>x.id===store.selectedId);
-  const saved = typeof window!=='undefined' ? JSON.parse(localStorage.getItem('vfpro-projects')||'[]') : [];
-  const Stat=({l,v,col}:{l:string;v:any;col?:string})=>(<div style={{background:c,border:`1px solid ${bd}`,borderRadius:7,padding:'7px',textAlign:'center'}}><div style={{fontSize:16,fontWeight:800,color:col||'#e8375a'}}>{v}</div><div style={{fontSize:9,color:m,marginTop:1}}>{l}</div></div>);
-  const Row=({l,v,col}:{l:string;v:any;col?:string})=>(<div style={{display:'flex',justifyContent:'space-between',padding:'4px 0',borderBottom:`1px solid ${bd}18`,fontSize:11}}><span style={{color:m}}>{l}</span><span style={{color:col||t,fontWeight:600}}>{v}</span></div>);
+
+  // FIX: read localStorage once on mount and on save, not on every render
+  const [saved, setSaved] = useState<any[]>([]);
+  useEffect(() => {
+    try {
+      setSaved(JSON.parse(localStorage.getItem('vfpro-projects') || '[]'));
+    } catch { setSaved([]); }
+  }, [store.project.updatedAt]); // re-read when project is saved
+
+  const Stat=({l,v,col}:{l:string;v:any;col?:string})=>(
+    <div style={{background:c,border:`1px solid ${bd}`,borderRadius:7,padding:'7px',textAlign:'center'}}>
+      <div style={{fontSize:16,fontWeight:800,color:col||'#e8375a'}}>{v}</div>
+      <div style={{fontSize:9,color:m,marginTop:1}}>{l}</div>
+    </div>
+  );
+  const Row=({l,v,col}:{l:string;v:any;col?:string})=>(
+    <div style={{display:'flex',justifyContent:'space-between',padding:'4px 0',borderBottom:`1px solid ${bd}18`,fontSize:11}}>
+      <span style={{color:m}}>{l}</span>
+      <span style={{color:col||t,fontWeight:600}}>{v}</span>
+    </div>
+  );
 
   return (
     <div style={{width:205,background:bg,borderLeft:`1px solid ${bd}`,display:'flex',flexDirection:'column',flexShrink:0,overflow:'auto'}}>
@@ -40,12 +61,13 @@ export default function ProInspector({ notify }:{ notify:(m:string,t?:any)=>void
           ))}
           <div style={{marginBottom:4}}>
             <div style={{fontSize:10,color:m,marginBottom:2}}>FPS</div>
-            <select value={store.project.fps} onChange={e=>store.setFps(+e.target.value)} style={{width:'100%',fontSize:11}}><option value={24}>24 fps</option><option value={30}>30 fps</option><option value={60}>60 fps</option></select>
+            <select value={store.project.fps} onChange={e=>store.setFps(+e.target.value)} style={{width:'100%',fontSize:11}}>
+              <option value={24}>24 fps</option><option value={30}>30 fps</option><option value={60}>60 fps</option>
+            </select>
           </div>
         </div>
 
-        {/* Selected clip inspector */}
-        {selClip&&<div style={{marginBottom:13,animation:'slideUp .15s ease'}}>
+        {selClip&&<div style={{marginBottom:13}}>
           <div style={{fontSize:10,fontWeight:700,color:m,marginBottom:7}}>SELECTED CLIP</div>
           <div style={{background:c,border:`1px solid ${bd}`,borderRadius:8,padding:10}}>
             <div style={{fontSize:12,fontWeight:700,color:selClip.color,marginBottom:8,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{selClip.name}</div>
@@ -55,8 +77,7 @@ export default function ProInspector({ notify }:{ notify:(m:string,t?:any)=>void
             <Row l="Volume" v={`${selClip.volume}%`} col="#10b981"/>
             <Row l="Opacity" v={`${selClip.opacity}%`}/>
             {selClip.transition&&<Row l="Transition" v={selClip.transition} col="#06b6d4"/>}
-            {selClip.filters.length>0&&<Row l="Filters" v={selClip.filters.length} col="#7c3aed"/>}
-            {/* Grade summary */}
+            {selClip.filters.length>0&&<Row l="FX" v={selClip.filters.join(', ')} col="#7c3aed"/>}
             <div style={{marginTop:8,paddingTop:8,borderTop:`1px solid ${bd}`}}>
               <div style={{fontSize:10,color:m,marginBottom:4}}>Color Grade</div>
               {(['brightness','contrast','saturation'] as const).map(k=>(selClip.grade[k]!==0&&(
@@ -66,7 +87,7 @@ export default function ProInspector({ notify }:{ notify:(m:string,t?:any)=>void
           </div>
         </div>}
 
-        {selAudio&&<div style={{marginBottom:13,animation:'slideUp .15s ease'}}>
+        {selAudio&&<div style={{marginBottom:13}}>
           <div style={{fontSize:10,fontWeight:700,color:m,marginBottom:7}}>SELECTED AUDIO</div>
           <div style={{background:c,border:`1px solid ${bd}`,borderRadius:8,padding:10}}>
             <div style={{fontSize:12,fontWeight:700,color:selAudio.color,marginBottom:8}}>{selAudio.name}</div>
@@ -76,7 +97,6 @@ export default function ProInspector({ notify }:{ notify:(m:string,t?:any)=>void
           </div>
         </div>}
 
-        {/* Recent projects */}
         {saved.length>0&&<div>
           <div style={{fontSize:10,fontWeight:700,color:m,marginBottom:7}}>RECENT</div>
           {saved.slice(0,5).map((p:any)=>(
