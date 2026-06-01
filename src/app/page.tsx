@@ -17,7 +17,8 @@ export default function Home() {
     grid: { display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(210px,1fr))', gap:14, maxWidth:760, width:'100%', marginBottom:44 },
     card: (c:string) => ({ background:dark?'#111118':'#fff', border:`1px solid ${dark?'#1a1a28':'#e0e0ec'}`, borderRadius:14, padding:'18px 16px', borderTop:`2px solid ${c}` }),
     btnPrimary: { background:'linear-gradient(135deg,#e8375a,#c0392b)', border:'none', borderRadius:10, padding:'14px 32px', color:'#fff', fontSize:15, fontWeight:800, cursor:'pointer', boxShadow:'0 4px 24px rgba(232,55,90,0.4)', letterSpacing:-0.3 },
-    btnSecondary: { background:dark?'#111118':'#fff', border:`1px solid ${dark?'#1a1a28':'#ddd'}`, borderRadius:10, padding:'14px 28px', color:dark?'#dde0ee':'#1a1a2e', fontSize:15, fontWeight:700, cursor:'pointer' },
+    btnSecondary: { background:dark?'#111118':'#fff', border:`1px solid ${dark?'#7c3aed':'#ddd'}`, borderRadius:10, padding:'14px 28px', color:dark?'#dde0ee':'#1a1a2e', fontSize:15, fontWeight:700, cursor:'pointer' },
+    btnTertiary: { background:'transparent', border:`1px solid ${dark?'#1a1a28':'#ddd'}`, borderRadius:10, padding:'14px 28px', color:dark?'#8888aa':'#666', fontSize:15, fontWeight:700, cursor:'pointer' },
   };
 
   const features = [
@@ -52,12 +53,16 @@ export default function Home() {
         ))}
       </div>
 
-      <div style={{ display:'flex', gap:12, flexWrap:'wrap', justifyContent:'center', marginBottom:20 }}>
-        <button style={S.btnPrimary} onClick={() => router.push('/editor')}>⚡ Launch Editor (Guest)</button>
-        {session
-          ? <button style={S.btnSecondary} onClick={() => router.push('/editor')}>Continue as {session.user?.name?.split(' ')[0]} →</button>
-          : <button style={S.btnSecondary} onClick={() => signIn('google', { callbackUrl:'/editor' })}>Sign in with Google</button>
-        }
+      {/* FIX: both buttons now route to real, working pages */}
+      <div style={{ display:'flex', gap:12, flexWrap:'wrap', justifyContent:'center', marginBottom:12 }}>
+        <button style={S.btnPrimary} onClick={() => router.push('/editor')}>🎬 Video Editor</button>
+        <button style={S.btnSecondary} onClick={() => router.push('/image-editor')}>🖌️ Image Editor</button>
+        {!session && (
+          <button style={S.btnTertiary} onClick={() => signIn('google', { callbackUrl:'/editor' })}>Sign in with Google</button>
+        )}
+        {session && (
+          <button style={S.btnTertiary} onClick={() => router.push('/editor')}>Continue as {session.user?.name?.split(' ')[0]} →</button>
+        )}
       </div>
       <p style={{ fontSize:11, color:dark?'#3a3a55':'#aaa' }}>No install · No cost · Runs in browser · Powered by FFmpeg + WebGL + Web Audio</p>
     </div>
