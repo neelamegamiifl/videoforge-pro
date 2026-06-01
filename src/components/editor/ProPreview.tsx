@@ -1,9 +1,21 @@
 'use client';
-import { useRef, useEffect, useState, useCallback } from 'react';
+import { useRef, useEffect, useState, useMemo } from 'react';
 import { useStore, PLATFORMS, defaultGrade } from '@/store/editor';
-import { WebGLGrader, getFilterCSS } from '@/lib/webgl';
+import { WebGLGrader, getFilterCSS, FX_CSS_MAP } from '@/lib/webgl';
 
-const fmt = (s:number)=>`${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}.${Math.floor((s%1)*10)}`;
+const fmt = (s:number) => `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}.${Math.floor((s%1)*10)}`;
+
+// FIX: text animation CSS map
+const TEXT_ANIM_CSS: Record<string, string> = {
+  'Fade In': 'fadeIn 0.5s ease forwards',
+  'Slide Up': 'slideUp 0.4s ease forwards',
+  'Slide Down': 'slideDown 0.4s ease forwards',
+  'Zoom In': 'zoomIn 0.4s ease forwards',
+  'Zoom Out': 'zoomOut 0.4s ease forwards',
+  'Bounce': 'bounce 0.6s ease forwards',
+  'Typewriter': 'none', // handled by overflow hidden
+  'Blur In': 'blurIn 0.5s ease forwards',
+};
 
 export default function ProPreview({ notify }:{ notify:(m:string,t?:any)=>void }) {
   const store = useStore();
@@ -14,13 +26,12 @@ export default function ProPreview({ notify }:{ notify:(m:string,t?:any)=>void }
   const [activeClip, setActiveClip] = useState<any>(null);
   const cfg = PLATFORMS[store.project.platform];
 
-  // Determine preview dimensions
   const previewH = 420;
   const previewW = cfg.ratio === '9:16' ? Math.round(previewH * 9/16)
     : cfg.ratio === '1:1' ? previewH
     : Math.round(previewH * 16/9);
 
-  // Init WebGL grader
+  // Init WebGL
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -30,29 +41,39 @@ export default function ProPreview({ notify }:{ notify:(m:string,t?:any)=>void }
     return () => { glRef.current?.destroy(); };
   }, []);
 
-  // Find active clip
+  // Find active clip and sync video element
   useEffect(() => {
     const clip = store.project.clips.find(c => c.visible && store.currentTime >= c.start && store.currentTime < c.start + c.duration) || null;
     setActiveClip(clip);
-    if (videoRef.current && clip?.type === 'video' && clip.url) {
-      const vid = videoRef.current;
+    const vid = videoRef.current;
+    if (!vid) return;
+    if (clip?.type === 'video' && clip.url) {
       if (vid.src !== clip.url) { vid.src = clip.url; }
       const seek = store.currentTime - clip.start + clip.trimIn;
-      if (Math.abs(vid.currentTime - seek) > 0.3) vid.currentTime = seek;
+      // FIX: tighter threshold to reduce drift
+      if (Math.abs(vid.currentTime - seek) > 0.15) vid.currentTime = seek;
       vid.playbackRate = clip.speed;
+      vid.volume = clip.muted ? 0 : Math.min(1, clip.volume / 100);
       if (store.playing && !clip.muted) vid.play().catch(()=>{});
       else vid.pause();
+    } else {
+      vid.pause();
+      vid.removeAttribute('src');
     }
   }, [store.currentTime, store.playing]);
 
-  // WebGL render loop
+  // FIX: WebGL render loop — only run when activeClip exists
   useEffect(() => {
     const canvas = canvasRef.current;
     const vid = videoRef.current;
-    if (!canvas || !vid || !activeClip) return;
+    // FIX: early exit when no active clip — stops GPU waste
+    if (!canvas || !vid || !activeClip) {
+      cancelAnimationFrame(rafRef.current);
+      return;
+    }
 
     const render = () => {
-      if (glRef.current && !vid.paused && !vid.ended) {
+      if (glRef.current) {
         try {
           glRef.current.uploadFrame(vid);
           glRef.current.render(activeClip.grade || defaultGrade(), previewW, previewH);
@@ -69,33 +90,52 @@ export default function ProPreview({ notify }:{ notify:(m:string,t?:any)=>void }
   const grade = activeClip?.grade || defaultGrade();
   const cssFilter = getFilterCSS(grade);
 
+  // FIX: compute CSS filter including applied FX filters
+  const fxCssFilter = useMemo(() => {
+    if (!activeClip?.filters?.length) return '';
+    return activeClip.filters.map((f: string) => FX_CSS_MAP[f] || '').filter(Boolean).join(' ');
+  }, [activeClip?.filters]);
+
+  const combinedFilter = [cssFilter, fxCssFilter].filter(Boolean).join(' ');
+
   return (
     <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', background:'#050507', gap:12, padding:16, overflow:'hidden', position:'relative' }}>
+      {/* Keyframes for text animations */}
+      <style>{`
+        @keyframes fadeIn { from { opacity:0 } to { opacity:1 } }
+        @keyframes slideUp { from { opacity:0; transform:translate(-50%,-40%) } to { opacity:1; transform:translate(-50%,-50%) } }
+        @keyframes slideDown { from { opacity:0; transform:translate(-50%,-60%) } to { opacity:1; transform:translate(-50%,-50%) } }
+        @keyframes zoomIn { from { opacity:0; transform:translate(-50%,-50%) scale(0.7) } to { opacity:1; transform:translate(-50%,-50%) scale(1) } }
+        @keyframes zoomOut { from { opacity:0; transform:translate(-50%,-50%) scale(1.3) } to { opacity:1; transform:translate(-50%,-50%) scale(1) } }
+        @keyframes bounce { 0%{transform:translate(-50%,-80%)}60%{transform:translate(-50%,-45%)}80%{transform:translate(-50%,-55%)}100%{transform:translate(-50%,-50%)} }
+        @keyframes blurIn { from{opacity:0;filter:blur(8px)}to{opacity:1;filter:blur(0)} }
+      `}</style>
 
-      {/* Platform info */}
       <div style={{ position:'absolute', top:12, left:'50%', transform:'translateX(-50%)', background:'rgba(13,13,18,0.9)', border:'1px solid #1a1a28', borderRadius:20, padding:'4px 14px', fontSize:11, fontWeight:600, color:'#8888aa', display:'flex', gap:8, alignItems:'center', zIndex:10, whiteSpace:'nowrap' }}>
         <span>{cfg.icon}</span> {cfg.label} · {cfg.ratio} · {cfg.w}×{cfg.h}
         {store.ffmpegReady && <span style={{ color:'#10b981', fontSize:10 }}>· FFmpeg ✓</span>}
       </div>
 
-      {/* Preview window */}
       <div style={{ position:'relative', width:previewW, height:previewH, background:'#000', borderRadius:10, overflow:'hidden', boxShadow:'0 0 0 1px #1a1a28, 0 20px 60px rgba(0,0,0,.8)', flexShrink:0 }}>
-
-        {/* WebGL canvas (color graded output) */}
+        {/* WebGL canvas */}
         <canvas ref={canvasRef} width={previewW} height={previewH}
           style={{ position:'absolute', inset:0, width:'100%', height:'100%', opacity: activeClip && glRef.current ? 1 : 0, zIndex:2 }} />
 
-        {/* Hidden video source for WebGL */}
-        <video ref={videoRef} crossOrigin="anonymous" playsInline muted={activeClip?.muted}
+        {/* Video source for WebGL */}
+        <video ref={videoRef} crossOrigin="anonymous" playsInline
           style={{ position:'absolute', inset:0, width:'100%', height:'100%', objectFit:'cover',
-            filter: glRef.current ? 'none' : cssFilter, // CSS fallback if no WebGL
+            filter: glRef.current ? 'none' : combinedFilter,
             opacity: activeClip?.type==='video' && !glRef.current ? 1 : (glRef.current ? 0 : 0),
             transform: `${activeClip?.flipH?'scaleX(-1)':''} ${activeClip?.flipV?'scaleY(-1)':''} rotate(${activeClip?.rotation||0}deg)`,
             zIndex:1 }} />
 
         {/* Image clips */}
         {activeClip?.type === 'image' && (
-          <img src={activeClip.url} style={{ position:'absolute', inset:0, width:'100%', height:'100%', objectFit:'cover', filter:cssFilter, opacity:activeClip.opacity/100, zIndex:2 }} alt="" />
+          <img src={activeClip.url}
+            style={{ position:'absolute', inset:0, width:'100%', height:'100%', objectFit:'cover',
+              filter: combinedFilter, opacity:activeClip.opacity/100, zIndex:2,
+              transform: `${activeClip.flipH?'scaleX(-1)':''} ${activeClip.flipV?'scaleY(-1)':''} rotate(${activeClip.rotation||0}deg)` }}
+            alt="" />
         )}
 
         {/* Empty state */}
@@ -109,52 +149,65 @@ export default function ProPreview({ notify }:{ notify:(m:string,t?:any)=>void }
           </div>
         )}
 
-        {/* Gap in timeline */}
         {!activeClip && store.project.clips.length > 0 && (
           <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100%', color:'#3a3a55', fontSize:13 }}>Gap / no clip at this time</div>
         )}
 
-        {/* Text overlays */}
-        {activeTexts.map(ov => (
-          <div key={ov.id} style={{ position:'absolute', left:`${ov.x}%`, top:`${ov.y}%`, transform:'translate(-50%,-50%)', color:ov.color, fontSize: Math.max(10, ov.fontSize * previewH / 1920), fontWeight:ov.bold?700:400, fontStyle:ov.italic?'italic':'normal', textDecoration:ov.underline?'underline':'none', fontFamily:ov.fontFamily, background:ov.bgColor||'transparent', padding:ov.bgColor?'3px 10px':0, borderRadius:4, textShadow:ov.shadow?'0 2px 8px rgba(0,0,0,0.9)':'none', textAlign:ov.align, pointerEvents:'none', letterSpacing:ov.letterSpacing||0, transform:`translate(-50%,-50%) rotate(${ov.rotation||0}deg)`, maxWidth:'90%', zIndex:5 }}>
-            {ov.text}
-          </div>
-        ))}
+        {/* FIX: Text overlays with animation support */}
+        {activeTexts.map(ov => {
+          const elapsed = store.currentTime - ov.start;
+          const animCSS = ov.animation && TEXT_ANIM_CSS[ov.animation] && elapsed < 1
+            ? TEXT_ANIM_CSS[ov.animation] : 'none';
+          return (
+            <div key={ov.id} style={{
+              position:'absolute', left:`${ov.x}%`, top:`${ov.y}%`,
+              transform:`translate(-50%,-50%) rotate(${ov.rotation||0}deg)`,
+              color:ov.color, fontSize: Math.max(10, ov.fontSize * previewH / 1920),
+              fontWeight:ov.bold?700:400, fontStyle:ov.italic?'italic':'normal',
+              textDecoration:ov.underline?'underline':'none', fontFamily:ov.fontFamily,
+              background:ov.bgColor||'transparent', padding:ov.bgColor?'3px 10px':0,
+              borderRadius:4, textShadow:ov.shadow?'0 2px 8px rgba(0,0,0,0.9)':'none',
+              textAlign:ov.align, letterSpacing:ov.letterSpacing||0,
+              maxWidth:'90%', zIndex:5,
+              animation: animCSS,
+              // FIX: pointer-events enabled to allow future drag-to-reposition
+              pointerEvents:'none',
+            }}>
+              {ov.text}
+            </div>
+          );
+        })}
 
-        {/* Captions */}
         {activeCaption && (
           <div style={{ position:'absolute', bottom:'10%', left:'50%', transform:'translateX(-50%)', background:'rgba(0,0,0,0.88)', color:'#fff', padding:'7px 18px', borderRadius:6, fontSize: Math.max(11, previewH * 0.033), fontWeight:700, whiteSpace:'nowrap', maxWidth:'92%', overflow:'hidden', textOverflow:'ellipsis', zIndex:6, textShadow:'0 1px 4px rgba(0,0,0,.9)' }}>
             {activeCaption.text}
           </div>
         )}
 
-        {/* Vignette overlay from grade */}
         {grade.vignette > 0 && (
           <div style={{ position:'absolute', inset:0, background:`radial-gradient(ellipse at center, transparent ${60-grade.vignette*0.3}%, rgba(0,0,0,${grade.vignette/100}) 100%)`, pointerEvents:'none', zIndex:4 }} />
         )}
 
-        {/* Grain overlay */}
         {grade.grain > 0 && (
           <div style={{ position:'absolute', inset:0, opacity: grade.grain/100 * 0.4, background:'url("data:image/svg+xml,%3Csvg viewBox=\'0 0 200 200\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cfilter id=\'n\'%3E%3CfeTurbulence type=\'fractalNoise\' baseFrequency=\'0.9\' numOctaves=\'4\' stitchTiles=\'stitch\'/%3E%3C/filter%3E%3Crect width=\'100%25\' height=\'100%25\' filter=\'url(%23n)\'/%3E%3C/svg%3E")', pointerEvents:'none', mixBlendMode:'overlay', zIndex:4 }} />
         )}
 
-        {/* Playhead time */}
         <div style={{ position:'absolute', top:8, right:8, background:'rgba(0,0,0,0.75)', borderRadius:6, padding:'3px 8px', fontSize:11, fontFamily:'JetBrains Mono,monospace', color:'#dde0ee', zIndex:10 }}>
           {fmt(store.currentTime)}
         </div>
       </div>
 
-      {/* Controls */}
+      {/* Playback controls */}
       <div style={{ display:'flex', alignItems:'center', gap:10, background:'#0d0d12', border:'1px solid #1a1a28', borderRadius:12, padding:'8px 18px' }}>
         <span style={{ fontSize:12, fontFamily:'monospace', color:'#8888aa', minWidth:62 }}>{fmt(store.currentTime)}</span>
-        <button onClick={()=>store.setCurrentTime(0)} style={{ background:'none',border:'none',cursor:'pointer',color:'#8888aa',fontSize:16 }} title="Go to start">⏮</button>
-        <button onClick={()=>store.setCurrentTime(Math.max(0,store.currentTime-1/30))} style={{ background:'none',border:'none',cursor:'pointer',color:'#8888aa',fontSize:14 }} title="Frame back">◀</button>
+        <button onClick={()=>store.setCurrentTime(0)} style={{ background:'none',border:'none',cursor:'pointer',color:'#8888aa',fontSize:16 }}>⏮</button>
+        <button onClick={()=>store.setCurrentTime(Math.max(0,store.currentTime-1/30))} style={{ background:'none',border:'none',cursor:'pointer',color:'#8888aa',fontSize:14 }}>◀</button>
         <button onClick={()=>store.setPlaying(!store.playing)}
           style={{ width:40,height:40,borderRadius:'50%',background:'linear-gradient(135deg,#e8375a,#c0392b)',border:'none',cursor:'pointer',color:'#fff',fontSize:18,display:'flex',alignItems:'center',justifyContent:'center',boxShadow:'0 2px 14px rgba(232,55,90,.5)',flexShrink:0 }}>
           {store.playing?'⏸':'▶'}
         </button>
-        <button onClick={()=>store.setCurrentTime(Math.min(store.project.duration,store.currentTime+1/30))} style={{ background:'none',border:'none',cursor:'pointer',color:'#8888aa',fontSize:14 }} title="Frame forward">▶</button>
-        <button onClick={()=>store.setCurrentTime(store.project.duration)} style={{ background:'none',border:'none',cursor:'pointer',color:'#8888aa',fontSize:16 }} title="Go to end">⏭</button>
+        <button onClick={()=>store.setCurrentTime(Math.min(store.project.duration,store.currentTime+1/30))} style={{ background:'none',border:'none',cursor:'pointer',color:'#8888aa',fontSize:14 }}>▶</button>
+        <button onClick={()=>store.setCurrentTime(store.project.duration)} style={{ background:'none',border:'none',cursor:'pointer',color:'#8888aa',fontSize:16 }}>⏭</button>
         <div style={{ display:'flex',alignItems:'center',gap:6 }}>
           <span style={{fontSize:14}}>🔊</span>
           <input type="range" min="0" max="100" value={store.volume} onChange={e=>store.setVolume(+e.target.value)} style={{width:70}} />
@@ -163,7 +216,6 @@ export default function ProPreview({ notify }:{ notify:(m:string,t?:any)=>void }
         <span style={{ fontSize:12, fontFamily:'monospace', color:'#8888aa', minWidth:62 }}>{fmt(store.project.duration)}</span>
       </div>
 
-      {/* Keyboard hints */}
       <div style={{ display:'flex', gap:14, fontSize:10, color:'#2a2a40' }}>
         {['Space: Play','J/L: ±5s','B: Razor','V: Select','Del: Delete','Ctrl+Z: Undo','Ctrl+S: Save'].map(h=><span key={h}>{h}</span>)}
       </div>
